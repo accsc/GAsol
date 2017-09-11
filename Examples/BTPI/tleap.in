@@ -1,0 +1,7 @@
+source leaprc.protein.ff14SB
+loadamberparams  frcmod.ionsjc_tip3p
+loadamberparams  frcmod.ionslm_1264_tip3p
+prot = loadpdb 5pti.pqr
+saveamberparm prot complex.prmtop complex.inpcrd
+savepdb prot complex.pdb
+quit
