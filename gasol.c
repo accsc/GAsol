@@ -1,6 +1,6 @@
 /********************************************************************
 
-GAsol Rev5
+GAsol rev6
 
 Alvaro Cortes and Lucia Fusani
 GlaxoSmithKline 2017
@@ -30,7 +30,6 @@ OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
 EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
 Compilation instructions:
 
 gcc gasol.c -o gasol -O3 -lm -fopenmp
@@ -40,11 +39,11 @@ To select the number of threads please use:
 export OMP_NUM_THREADS=12 (bash)
 setenv OMP_NUM_THREADS 12 (csh/tcsh)
 
-Otherwise, OpenMP will determine the number of CPUs autmatically and adjust the number 
+Otherwise, OpenMP will determine the number of CPUs autmatically and adjust the number
 of threads accordingly.
 
-
-Changes:
+Rev6 - Added water numbers check 
+       Fixed bug in water-water distance threshold check
 
 Rev5 - Added ratio parameter to allow very low density waters (ratio=population/radius)
        Renamed program to "GAsol" or Genetic Algorithm for SOLvent placement
@@ -55,8 +54,8 @@ Rev4 - Fixed bugs related to ligand parsing
 Rev3 - First version based on population pre-calculation for speed
        Added option to read a PDB file with a ligand to set centre of the sphere
 
+Please send any feedback to alvaro.x.cortes@gsk.com
 
-Please send any feedback to alvaro.x.cortes@gsk.com 
 
 ********************************************************************/
 
@@ -69,10 +68,10 @@ Please send any feedback to alvaro.x.cortes@gsk.com
 #include <time.h>
 
 
-void show_usage(char *argv0)
+void show_usage()
 {
 
-        fprintf(stderr,"Usage: %s <params>\n\n",argv0);
+        fprintf(stderr,"Usage: gasol <params>\n\n");
         fprintf(stderr,"Valid params:\n");
         fprintf(stderr,"\t-d or --dx <DX file>. Set the grid filename.\n");
         fprintf(stderr,"\t-x <value>. Set the center of the spatial filter (optional).\n");
@@ -197,7 +196,7 @@ int main( int argc, char *argv[])
 	int **population = NULL, **offspring = NULL, *best_ever = NULL;
 	double *fitness = NULL, *new_fitness = NULL, current_g = 0;
 	int max_ind = 0, nind = 0, ngen = 0, max_ngen = 0, ig = 0, jg = 0, kg = 0, lg = 0;
-        double best_fitness = -9999.0f, w_sum = 0, all_g = 0;
+        double best_fitness = -9999.0f, w_sum = 0, all_g = 0, full_integ = 0.0;
 	float *points_radii = NULL;
 	int **forbid_combination = NULL;
 	float current_distance = 0.0f, current_population = 0.0f;
@@ -311,7 +310,7 @@ int main( int argc, char *argv[])
                 srand(seed);
 
 
-        fprintf(stderr,"GAsol rev5 - A program to place water molecules using density grids\n");
+        fprintf(stderr,"GAsol rev6 - A program to place water molecules using density grids\n");
         fprintf(stderr,"By Alvaro Cortes and Lucia Fusani. 2017 GlaxoSmithKline\n");
         fflush(stderr);
 
@@ -320,7 +319,7 @@ int main( int argc, char *argv[])
 	{
 		fprintf(stderr,"No grid file provided\n");
 		fflush(stderr);
-                show_usage(argv[0]);
+                show_usage();
 		exit(-1);
 	}
 
@@ -328,7 +327,7 @@ int main( int argc, char *argv[])
 	{
 		fprintf(stderr,"Cannot open the DX file %s\n",grid_name);
 		fflush(stderr);
-		show_usage(argv[0]);
+		show_usage();
 		exit(-1);
 	}
 
@@ -494,7 +493,7 @@ int main( int argc, char *argv[])
            threshold too */
 	fprintf(stderr,"Selecting grid points and calculating populations ...");
 	fflush(stderr);
-
+        full_integ = 0.0;
 	for( i = 0; i < nx; i++)
 	{
 		for(j = 0; j < ny; j++)
@@ -508,7 +507,8 @@ int main( int argc, char *argv[])
                                         dy = (min[1] + delta[1]*j) - select_y;
                                         dz = (min[2] + delta[2]*k) - select_z;
                                         dr = (dx*dx) + (dy*dy) + (dz*dz);
-
+					if( dr <= select_radius)
+						full_integ += data[l]*delta[0]*delta[1]*delta[2] * concentration * 6.0221415E-4;
 					if( data[l] >= threshold && dr <= select_radius) 
 					{
 						x_index[current_point] = i;
@@ -519,6 +519,8 @@ int main( int argc, char *argv[])
 						++current_point;
 					}
 				}else{
+
+					full_integ += data[l]*delta[0]*delta[1]*delta[2] * concentration * 6.0221415E-4;
 
                                         if( data[l] >= threshold)
                                         {
@@ -534,8 +536,7 @@ int main( int argc, char *argv[])
 			}
 		}
 	}
-
-    points_radii = (float *) calloc(sizeof(float),current_point);
+    	points_radii = (float *) calloc(sizeof(float),current_point);
 	forbid_combination = (int **) calloc(sizeof(int *), current_point);
 	for( i = 0; i < current_point; i++)
 	{
@@ -554,7 +555,7 @@ int main( int argc, char *argv[])
                 jg = y_index[l];
                 kg = z_index[l];
 		lg = 0;
-                current_distance = 1.3;
+                current_distance = 0.9;
 		current_population = data[l]*delta[0]*delta[1]*delta[2] * concentration * 6.0221415E-4;
                 while( current_distance < 2.6 && current_population < 1.0)
                 {
@@ -590,7 +591,7 @@ int main( int argc, char *argv[])
                 if(max_g[l] < min_ratio)
 			points_radii[l] = 999.9; /* Basically eliminates this molecule from all solutions. TODO: I should remove this site instead of making it invisible */
 		else
-			points_radii[l] = current_distance;
+			points_radii[l] = 1.5; /*current_distance/current_population; */
 
 #ifdef DEBUG
 	fprintf(stderr,"%i point %f density %f distance\n",l,current_population,current_distance);
@@ -612,7 +613,8 @@ int main( int argc, char *argv[])
                 dy = (min[1] + delta[1]*y_index[lg]) - (min[1] + delta[1]*jg);
                 dz = (min[2] + delta[2]*z_index[lg]) - (min[2] + delta[2]*kg);
                 dr = (dx*dx) + (dy*dy) + (dz*dz);
-                if( dr <= (points_radii[l]*points_radii[l]) || dr <= (points_radii[lg]*points_radii[lg]))
+                /*if( dr <= (points_radii[l]*points_radii[l]) || dr <= (points_radii[lg]*points_radii[lg]))*/
+                if( dr <= ((points_radii[l]+points_radii[lg])*(points_radii[l]+points_radii[lg])))
                 {
 					forbid_combination[l][lg] = 1;
 					forbid_combination[lg][l] = 1;
@@ -623,6 +625,7 @@ int main( int argc, char *argv[])
 		
 
 	fprintf(stderr," done\n");
+        fprintf(stderr,"Number of predicted water molecules in the site: %f\n",full_integ);
 	fflush(stderr);
 
 	fprintf(stderr,"Chromosomes of %i genes\n",current_point);
@@ -848,6 +851,14 @@ int main( int argc, char *argv[])
 	printf("TER\n");
 	printf("ENDMDL\n");
 	fflush(stdout);
+	if( ceil(full_integ) < i)
+	{
+		fprintf(stderr,"Warning: current solution has %i more water molecule/s than the integral of g(r)\n",i- (int) ceil(full_integ));
+		fprintf(stderr,"It may mean that some waters are partially occupied sites or false positives\n");
+		fprintf(stderr,"Please Increase the ratio threshold with --ratio\n");
+		fflush(stderr);
+	}
+        
 	/* Save the whales and free the mallocs! */
 	free(buffer_line);
 	for(i = 0; i < 20; i++)
